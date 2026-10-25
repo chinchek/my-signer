@@ -1,0 +1,134 @@
+name: Auto Sign IPA and Generate Install Link
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_file:
+        description: 'Upload your unsigned .ipa file'
+        required: true
+        type: string
+      p12_file_base64:
+        description: 'Paste your .p12 file converted to Base64 string'
+        required: true
+        type: string
+      p12_password:
+        description: 'Enter your .p12 password'
+        required: true
+        type: string
+      mobileprovision_base64:
+        description: 'Paste your .mobileprovision converted to Base64 string'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  sign-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps:deployment.outputs.page_url }}index.html
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install zsign (Fast signing tool)
+        run: |
+          brew install openssl
+          git clone https://github.com
+          cd zsign
+          g++ *.cpp -lcrypto -O3 -o zsign
+          sudo cp zsign /usr/local/bin/
+          cd ..
+
+      - name: Prepare Signing Files
+        run: |
+          echo "${{ inputs.p12_file_base64 }}" | base64 --decode > cert.p12
+          echo "${{ inputs.mobileprovision_base64 }}" | base64 --decode > embedded.mobileprovision
+          
+          # Download the IPA from URL provided or modify to handle direct upload artifact
+          curl -L "${{ inputs.ipa_file }}" -o app.ipa
+
+      - name: Sign the IPA
+        run: |
+          zsign -k cert.p12 -p "${{ inputs.p12_password }}" -m embedded.mobileprovision -o signed.ipa app.ipa
+
+      - name: Create Web Page and Manifest for Installation
+        run: |
+          mkdir -p ipa-dist
+          mv signed.ipa ipa-dist/app.ipa
+          
+          # Generate manifest.plist required by Apple for OTA install
+          cat <<EOF > ipa-dist/manifest.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://apple.com">
+          <plist version="1.0">
+          <dict>
+            <key>items</key>
+            <array>
+              <dict>
+                <key>assets</key>
+                <array>
+                  <dict>
+                    <key>kind</key>
+                    <key>software-package</key>
+                    <key>url</key>
+                    <string>https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/app.ipa</string>
+                  </dict>
+                </array>
+                <key>metadata</key>
+                <dict>
+                  <key>bundle-identifier</key>
+                  <string>com.personal.signapp</string>
+                  <key>bundle-version</key>
+                  <string>1.0.0</string>
+                  <key>kind</key>
+                  <software</key>
+                  <title>Signed App</title>
+                </dict>
+              </dict>
+            </array>
+          </dict>
+          </plist>
+          EOF
+
+          # Generate index.html with the Install Button
+          cat <<EOF > ipa-dist/index.html
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Install Signed App</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <style>
+                  body { font-family: -apple-system, sans-serif; text-align: center; padding: 50px 20px; background-color: #f5f5f7; }
+                  .btn { display: inline-block; padding: 15px 30px; background-color: #0071e3; color: white; text-decoration: none; font-size: 18px; font-weight: bold; border-radius: 12px; margin-top: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+                  h1 { color: #1d1d1f; }
+                  p { color: #86868b; }
+              </style>
+          </head>
+          <body>
+              <h1>កម្មវិធីរបស់អ្នករួចរាល់ហើយ!</h1>
+              <p>សូមចុចប៊ូតុងខាងក្រោមដើម្បីដំឡើងកម្មវិធីចូលទូរសព្ទ</p>
+              <a class="btn" href="itms-services://?action=download-manifest&url=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/manifest.plist">ចុចដំឡើងនៅទីនេះ (Install App)</a>
+          </body>
+          </html>
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './ipa-dist'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
