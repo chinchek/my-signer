@@ -52,8 +52,6 @@ jobs:
         run: |
           echo "${{ inputs.p12_file_base64 }}" | base64 --decode > cert.p12
           echo "${{ inputs.mobileprovision_base64 }}" | base64 --decode > embedded.mobileprovision
-          
-          # Download the IPA from URL provided or modify to handle direct upload artifact
           curl -L "${{ inputs.ipa_file }}" -o app.ipa
 
       - name: Sign the IPA
@@ -65,7 +63,6 @@ jobs:
           mkdir -p ipa-dist
           mv signed.ipa ipa-dist/app.ipa
           
-          # Generate manifest.plist required by Apple for OTA install
           cat <<EOF > ipa-dist/manifest.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://apple.com">
@@ -90,8 +87,9 @@ jobs:
                   <key>bundle-version</key>
                   <string>1.0.0</string>
                   <key>kind</key>
-                  <software</key>
-                  <title>Signed App</title>
+                  <string>software</string>
+                  <key>title</key>
+                  <string>Signed App</string>
                 </dict>
               </dict>
             </array>
@@ -99,7 +97,6 @@ jobs:
           </plist>
           EOF
 
-          # Generate index.html with the Install Button
           cat <<EOF > ipa-dist/index.html
           <!DOCTYPE html>
           <html>
